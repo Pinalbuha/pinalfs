@@ -1,7 +1,6 @@
 #----------------------------------------------------------------------------#
 # Imports
 #----------------------------------------------------------------------------#
-import sys
 import datetime
 import json
 import dateutil.parser
@@ -32,67 +31,8 @@ migrate = Migrate(app, db)
 # Models.
 #----------------------------------------------------------------------------#
 
-class Venue(db.Model):
-    __tablename__ = 'Venue'
+from model import *
 
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    city = db.Column(db.String(120))
-    state = db.Column(db.String(120))
-    address = db.Column(db.String(120))
-    phone = db.Column(db.String(120))
-    image_link = db.Column(db.String(500))
-    facebook_link = db.Column(db.String(120))
-
-    # TODO: implement any missing fields, as a database migration using Flask-Migrate
-    genres = db.Column(db.ARRAY(db.String()), nullable=False)
-    website = db.Column(db.String())
-    seeking_talent = db.Column(db.Boolean(), default=False)
-    seeking_description = db.Column(db.String())
-    shows = db.relationship('Show', backref='venue', lazy=True)
-
-    def __repr__(self):
-      return f'<Venue {self.id} name: {self.name}>'
-    
-
-class Artist(db.Model):
-    __tablename__ = 'Artist'
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    city = db.Column(db.String(120))
-    state = db.Column(db.String(120))
-    phone = db.Column(db.String(120))
-    genres = db.Column(db.ARRAY(db.String()))
-    image_link = db.Column(db.String(500))
-    facebook_link = db.Column(db.String(120))
-    website = db.Column(db.String())
-    seeking_venue = db.Column(db.Boolean(),nullable=False, default=False)
-    seeking_description = db.Column(db.String())
-    shows = db.relationship('Show', backref='artist', lazy=True)
-
-    def __repr__(self):
-      return f'<Artist {self.id} name: {self.name}>'
-
-    # TODO: implement any missing fields, as a database migration using Flask-Migrate
-
-# TODO Implement Show and Artist models, and complete all model relationships and properties, as a database migration.
-
-
-class Show(db.Model):
-    __tablename__ = 'Show'
-
-    id = db.Column(db.Integer, primary_key=True)
-    venue_id = db.Column(db.Integer, db.ForeignKey('Venue.id'), nullable=False)
-    
-    artist_id = db.Column(db.Integer, db.ForeignKey('Artist.id'), nullable=False)
-    
-    start_time = db.Column(db.DateTime)
-
-    def __repr__(self):
-      return f'<Show {self.id}, Artist {self.artist_id},Venue{self.venue_id}>'
-
-    #db.create_all()
 #----------------------------------------------------------------------------#
 # Filters.
 #----------------------------------------------------------------------------#
@@ -156,13 +96,17 @@ def search_venues():
   # TODO: implement search on artists with partial string search. Ensure it is case-insensitive.
   # seach for Hop should return "The Musical Hop".
   # search for "Music" should return "The Musical Hop" and "Park Square Live Music & Coffee"
-  search_term = request.form.get('search-term', '') 
-  venues = Venue.query.filter(Venue.name.ilike("%" + search_term + "%"))
-  data = []
+  search_term = request.form.get('search_term', '')
+  venues = Venue.query.filter(Venue.name.ilike("%" + search_term + "%")).all()
   response = {
-    "count": venues.count(),
-    "data": venues
+    "count": len(venues),
+    "data": []
   }
+  for venue in venues:
+    response["data"].append({
+        'id': venue.id,
+        'name': venue.name,
+    })
   
   return render_template('pages/search_venues.html', results=response, search_term=request.form.get('search_term', ''))
 
@@ -172,24 +116,27 @@ def show_venue(venue_id):
   # TODO: replace with real venue data from the venues table, using venue_id
 
   venue = Venue.query.get(venue_id)
-  shows = Show.query.filter_by(venue_id= venue_id).all()
-  past_shows = []
+  upcoming_shows_query = db.session.query(Show).join(Artist).filter(Show.venue_id==venue_id).filter(Show.start_time>datetime.now()).all()
   upcoming_shows = []
-  current_time = datetime.now()
 
-  for show in shows:
-    
-    data = {
-        "artist_id": show.artist_id,
-        "artist_name": show.artist.name,
-        "artist_image_link":show.artist.image_link,
-        "start_time": format_datetime(str(show.start_time))
-        }
+  past_shows_query = db.session.query(Show).join(Artist).filter(Show.venue_id==venue_id).filter(Show.start_time<datetime.now()).all()
+  past_shows = []
 
-    if show.start_time > current_time:
-      upcoming_shows.append(data)
-    else:
-      past_shows.append(data)
+  for show in past_shows_query:
+    past_shows.append({
+      "artist_id": show.artist_id,
+      "artist_name": show.artist.name,
+      "artist_image_link": show.artist.image_link,
+      "start_time": show.start_time.strftime('%Y-%m-%d %H:%M:%S')
+    })
+
+  for show in upcoming_shows_query:
+    upcoming_shows.append({
+      "artist_id": show.artist_id,
+      "artist_name": show.artist.name,
+      "artist_image_link": show.artist.image_link,
+      "start_time": show.start_time.strftime("%Y-%m-%d %H:%M:%S")    
+    })
 
   data = {
       "id": venue.id,
@@ -318,24 +265,28 @@ def show_artist(artist_id):
   # TODO: replace with real artist data from the artist table, using artist_id
 
   artist = Artist.query.get(artist_id)
-  list_shows = Show.query.filter_by(artist_id = artist_id).all()
-  past_shows =[]
+  past_shows_query = db.session.query(Show).join(Venue).filter(Show.artist_id==artist_id).filter(Show.start_time>datetime.now()).all()
+  past_shows = []
+  upcoming_shows_query = db.session.query(Show).join(Venue).filter(Show.artist_id==artist_id).filter(Show.start_time>datetime.now()).all()
   upcoming_shows = []
-  current_time = datetime.now()
 
-  for show in list_shows:
-      
-    data_now = {
-            "venue_id": show.venue_id,
-            "venue_name":show.venue.name,
-            "venue_image_link":show.venue.image_link,
-            "start_time":format_datetime(str(show.start_time))
-          }
+  for show in past_shows_query:
+    past_shows.append({
+      "venue_id": show.venue_id,
+      "venue_name": show.venue.name,
+      "venue_image_link":show.venue.image_link,
+      "start_time": show.start_time.strftime('%Y-%m-%d %H:%M:%S')
+    })
 
-    if show.start_time > current_time:
-       upcoming_shows.append(data_now)
-    else :
-        past_shows.append(data_now)
+  
+
+  for show in upcoming_shows_query:
+    upcoming_shows.append({
+      "venue_id": show.venue_id,
+      "venue_name": show.venue.name,
+      "venue_image_link":show.venue.image_link,
+      "start_time": show.start_time.strftime('%Y-%m-%d %H:%M:%S')
+    })
 
   data = {
         "id": artist.id,
@@ -503,6 +454,7 @@ def shows():
         data.extend([{
             "venue_id": venue.id,
             "venue_name": venue.name,
+            "venue_image_link": venue.image_link,
             "artist_id": artist.id,
             "artist_name": artist.name,
             "artist_image_link": artist.image_link,
